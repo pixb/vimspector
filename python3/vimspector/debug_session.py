@@ -41,9 +41,25 @@ VIMSPECTOR_HOME = utils.GetVimspectorBase()
 # cache of what the user entered for any option we ask them
 USER_CHOICES = {}
 
+NEXT_SESSION_ID = 0
+SESSIONS = {}
+
+
+def PushSession( session ):
+  global NEXT_SESSION_ID
+  this_id = NEXT_SESSION_ID
+  NEXT_SESSION_ID = NEXT_SESSION_ID + 1
+  SESSIONS[ this_id ] = session
+  return this_id
+
+
+def PopSession( session ):
+  SESSIONS.pop( session.session_id, None )
+
 
 class DebugSession( object ):
   def __init__( self, api_prefix ):
+    self.session_id = PushSession( self )
     self._logger = logging.getLogger( __name__ )
     utils.SetUpLogging( self._logger )
 
@@ -70,6 +86,11 @@ class DebugSession( object ):
     self._adapter = None
 
     self._ResetServerState()
+
+
+  def __del__( self ):
+    PopSession( self )
+
 
   def _ResetServerState( self ):
     self._connection = None
@@ -766,8 +787,10 @@ class DebugSession( object ):
 
     vim.vars[ '_vimspector_adapter_spec' ] = self._adapter
     if not vim.eval( "vimspector#internal#{}#StartDebugSession( "
+                     "  {},"
                      "  g:_vimspector_adapter_spec "
-                     ")".format( self._connection_type ) ):
+                     ")".format( self._connection_type,
+                                 self.session_id ) ):
       self._logger.error( "Unable to start debug server" )
       self._splash_screen = utils.DisplaySplash( self._api_prefix,
                                                  self._splash_screen,
@@ -777,6 +800,7 @@ class DebugSession( object ):
         self,
         lambda msg: utils.Call(
           "vimspector#internal#{}#Send".format( self._connection_type ),
+          self.session_id,
           msg ) )
 
     self._logger.info( 'Debug Adapter Started' )
@@ -796,8 +820,9 @@ class DebugSession( object ):
         assert not self._run_on_server_exit
         self._run_on_server_exit = callback
 
-      vim.eval( 'vimspector#internal#{}#StopDebugSession()'.format(
-        self._connection_type ) )
+      vim.eval( 'vimspector#internal#{}#StopDebugSession( {} )'.format(
+        self._connection_type,
+        self.session_id ) )
 
     arguments = {}
     if self._server_capabilities.get( 'supportTerminateDebuggee' ):

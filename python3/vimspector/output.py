@@ -63,6 +63,8 @@ class OutputView( object ):
     self._buffers = {}
     self._api_prefix = api_prefix
     VIEWS.add( self )
+    # FIXME: hack?
+    self._session_id = hash( self )
 
   def Print( self, categroy, text ):
     self._Print( 'server', text.splitlines() )
@@ -101,7 +103,7 @@ class OutputView( object ):
   def Clear( self ):
     for category, tab_buffer in self._buffers.items():
       if tab_buffer.is_job:
-        utils.CleanUpCommand( category, self._api_prefix )
+        utils.CleanUpCommand( self._session_id, category, self._api_prefix )
       utils.CleanUpHiddenBuffer( tab_buffer.buf )
 
     # FIXME: nunmenu the WinBar ?
@@ -170,6 +172,7 @@ class OutputView( object ):
 
     if cmd is not None:
       out = utils.SetUpCommandBuffer(
+        self._session_id, # TODO: not really a session id
         cmd,
         category,
         self._api_prefix,

@@ -19,8 +19,12 @@ let s:save_cpo = &cpoptions
 set cpoptions&vim
 " }}}
 
-function! s:_OnServerData( channel, data ) abort
-  if !exists( 's:ch' ) || s:ch isnot a:channel
+let s:channels = {}
+let s:jobs = {}
+
+function! s:_OnServerData( session_id, channel, data ) abort
+  if !has_key( s:channels, a:session_id ) ||
+        \ s:channels[ a:session_id ] isnot a:channel
     return
   endif
 
@@ -29,20 +33,23 @@ _vimspector_session.OnChannelData( vim.eval( 'a:data' ) )
 EOF
 endfunction
 
-function! s:_OnClose( channel ) abort
-  if !exists( 's:ch' ) || s:ch isnot a:channel
+function! s:_OnClose( session_id, channel ) abort
+  if !has_key( s:channels, a:session_id ) ||
+        \ s:channels[ a:session_id ] isnot a:channel
     return
   endif
 
   echom 'Channel closed'
   redraw
-  unlet s:ch
+  unlet s:channels[ a:session_id ]
   py3 _vimspector_session.OnServerExit( 0 )
 endfunction
 
-function! vimspector#internal#channel#StartDebugSession( config ) abort
+function! vimspector#internal#channel#StartDebugSession(
+      \ session_id,
+      \ config ) abort
 
-  if exists( 's:ch' )
+  if has_key( s:channels, a:session_id )
     echo 'Channel is already running'
     return v:false
   endif
@@ -65,16 +72,19 @@ function! vimspector#internal#channel#StartDebugSession( config ) abort
   let l:addr = get( a:config, 'host', 'localhost' ) . ':' . a:config[ 'port' ]
 
   echo 'Connecting to ' . l:addr . '... (waiting fo up to 10 seconds)'
-  let s:ch = ch_open( l:addr,
+  " FIXME: This _always_ waits 10s; the neochannel version is quicker
+  let s:channels[ a:session_id ] = ch_open( l:addr,
         \             {
         \                 'mode': 'raw',
-        \                 'callback': funcref( 's:_OnServerData' ),
-        \                 'close_cb': funcref( 's:_OnClose' ),
+        \                 'callback': funcref( 's:_OnServerData',
+        \                                       [ a:session_id ] ),
+        \                 'close_cb': funcref( 's:_OnClose',
+        \                                      [ a:session_id ] ),
         \                 'waittime': 10000,
         \             }
         \           )
 
-  if ch_status( s:ch ) !=# 'open'
+  if ch_status( s:channels[ a:session_id ] ) !=# 'open'
     echom 'Unable to connect to' l:addr
     redraw
     return v:false
@@ -83,39 +93,38 @@ function! vimspector#internal#channel#StartDebugSession( config ) abort
   return v:true
 endfunction
 
-function! vimspector#internal#channel#Send( msg ) abort
-  call ch_sendraw( s:ch, a:msg )
+function! vimspector#internal#channel#Send( session_id, msg ) abort
+  call ch_sendraw( s:channels[ a:session_id ], a:msg )
   return 1
 endfunction
 
-function! vimspector#internal#channel#Timeout( id ) abort
+function! vimspector#internal#channel#Timeout( session_id, id ) abort
   py3 << EOF
 _vimspector_session.OnRequestTimeout( vim.eval( 'a:id' ) )
 EOF
 endfunction
 
-function! vimspector#internal#channel#StopDebugSession() abort
-  if exists( 's:ch' ) && ch_status( s:ch ) ==# 'open'
+function! vimspector#internal#channel#StopDebugSession( session_id ) abort
+  if has_key( s:channels, a:session_id ) &&
+        \ ch_status( s:channels[ a:session_id ] ) ==# 'open'
     " channel is open, close it and trigger the callback. The callback is _not_
     " triggered when manually calling ch_close. if we get here and the channel
     " is not open, then we there is a _OnClose callback waiting for us, so do
     " nothing.
-    call ch_close( s:ch )
-    call s:_OnClose( s:ch )
+    call ch_close( s:channels[ a:session_id ] )
+    call s:_OnClose( a:session_id, s:channels[ a:session_id ] )
   endif
 
-  if exists( 's:job' )
-    if job_status( s:job ) ==# 'run'
-      call job_stop( s:job, 'kill' )
+  if has_key( s:jobs, a:session_id )
+    if job_status( s:jobs[ a:session_id ] ) ==# 'run'
+      call job_stop( s:jobs[ a:session_id ], 'kill' )
     endif
     unlet s:job
   endif
 endfunction
 
-function! vimspector#internal#channel#Reset() abort
-  if exists( 's:ch' ) || exists( 's:job' )
-    call vimspector#internal#channel#StopDebugSession()
-  endif
+function! vimspector#internal#channel#Reset( session_id ) abort
+  call vimspector#internal#channel#StopDebugSession( a:session_id )
 endfunction
 
 " Boilerplate {{{

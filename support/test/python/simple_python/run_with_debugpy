@@ -14,6 +14,7 @@ pushd $(dirname $0)
   $PYTHON -m venv env
   . env/bin/activate
   python -m pip install -r requirements.txt
+  echo "PORT: 5678"
   echo "*** Launching ***"
   python -m debugpy --wait-for-client --listen 0.0.0.0:5678 main.py
 popd
